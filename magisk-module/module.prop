@@ -1,0 +1,6 @@
+id=btmicsplit
+name=BT Mic Split
+version=v1.0
+versionCode=1
+author=Priyanshu
+description=Installs BT Mic Split QS tile as a priv-app and sets up the persist property used by the LSPosed hook.

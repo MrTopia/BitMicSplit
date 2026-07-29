@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Leave empty (or remove the xposedscope meta-data entirely) to hook
+      every app. To restrict to specific apps instead, list package names:
+    -->
+    <string-array name="xposed_scope">
+        <!-- <item>com.whatsapp</item> -->
+        <!-- <item>com.discord</item> -->
+    </string-array>
+</resources>
