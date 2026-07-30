@@ -32,13 +32,9 @@ class SplitAudioHook : IXposedHookLoadPackage {
     }
 
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
-        // System UI / system_server aren't reached via handleLoadPackage in the
-        // typical Zygisk/LSPosed all-apps scope config; this hooks every regular
-        // app process, which is where AudioManager/BluetoothHeadset calls
-        // requesting SCO actually originate.
-
         hookAudioManagerSco(lpparam)
         hookBluetoothHeadsetSco(lpparam)
+        hookTelecomIntegration(lpparam)
     }
 
     private fun hookAudioManagerSco(lpparam: LoadPackageParam) {
@@ -46,19 +42,14 @@ class SplitAudioHook : IXposedHookLoadPackage {
             override fun replaceHookedMethod(param: MethodHookParam): Any? {
                 return if (isSplitEnabled()) {
                     XposedBridge.log("$TAG: blocked ${param.method.name} from ${lpparam.packageName}")
-                    null // no-op: never bring up the SCO link
+                    null
                 } else {
                     XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
                 }
             }
         }
 
-        // Public API present since API 1.
         tryHook(AudioManager::class.java, "startBluetoothSco", blockingReplacement)
-
-        // Hidden/internal API used for VoIP-style virtual calls — present on
-        // most AOSP-derived versions but guard in case a vendor tree renamed
-        // or removed it.
         tryHook(AudioManager::class.java, "startBluetoothScoVirtualCall", blockingReplacement)
     }
 
@@ -78,6 +69,40 @@ class SplitAudioHook : IXposedHookLoadPackage {
             })
         } catch (t: Throwable) {
             // BluetoothHeadset not loaded in this process — expected for most apps.
+        }
+    }
+
+    /**
+     * Discord registers itself with Telecom as a self-managed ConnectionService,
+     * which is what pulls Bluetooth SCO in for its calls (confirmed via logcat:
+     * CallAudioRouteController managing the route). Blocking Discord's Telecom
+     * calls stops that integration — voice chat itself is separate WebRTC audio
+     * and shouldn't be affected, but Discord's own call notification/Bluetooth
+     * media-button controls may stop working while this is on. Scoped to
+     * Discord only, as a safety measure against affecting other apps.
+     */
+    private fun hookTelecomIntegration(lpparam: LoadPackageParam) {
+        if (lpparam.packageName != "com.discord") return
+
+        try {
+            val telecomCls = XposedHelpers.findClass(
+                "android.telecom.TelecomManager", lpparam.classLoader
+            )
+            val blockingReplacement = object : XC_MethodReplacement() {
+                override fun replaceHookedMethod(param: MethodHookParam): Any? {
+                    return if (isSplitEnabled()) {
+                        XposedBridge.log("$TAG: blocked Telecom.${param.method.name} from Discord")
+                        null
+                    } else {
+                        XposedBridge.invokeOriginalMethod(param.method, param.thisObject, param.args)
+                    }
+                }
+            }
+            tryHook(telecomCls, "placeCall", blockingReplacement)
+            tryHook(telecomCls, "addNewIncomingCall", blockingReplacement)
+            tryHook(telecomCls, "registerPhoneAccount", blockingReplacement)
+        } catch (t: Throwable) {
+            // TelecomManager not loaded in this process, or class not found — skip quietly.
         }
     }
 
